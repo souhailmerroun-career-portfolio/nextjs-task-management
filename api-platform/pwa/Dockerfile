@@ -1,70 +1,46 @@
-#syntax=docker/dockerfile:1.4
-# Base stage for dev and build
-FROM node:18-alpine as builder_base
-
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-RUN apk add --no-cache libc6-compat
-
-WORKDIR /srv/app
-
-RUN corepack enable && \
-	corepack prepare --activate pnpm@latest && \
-    pnpm config set store-dir /.pnpm-store
-
-# Next.js collects completely anonymous telemetry data about general usage.
-# Learn more here: https://nextjs.org/telemetry
-# Uncomment the following line in case you want to disable telemetry during dev and build.
-# ENV NEXT_TELEMETRY_DISABLED 1
+# https://docs.docker.com/develop/develop-images/multistage-build/#stop-at-a-specific-build-stage
+# https://docs.docker.com/compose/compose-file/#target
 
 
-# Deps stage, preserve dependencies in cache as long as the lockfile isn't changed
-FROM builder_base AS deps
+# https://docs.docker.com/engine/reference/builder/#understand-how-arg-and-from-interact
+ARG NODE_VERSION=16
 
-COPY --link pnpm-lock.yaml ./
-RUN pnpm fetch
-
-COPY --link . .
-RUN pnpm install -r --offline
-
-
-# Development image
-FROM deps as dev
+# "common" stage
+FROM node:${NODE_VERSION}-alpine AS api_platform_pwa_common
 
 EXPOSE 3000
-ENV PORT 3000
 
-CMD ["sh", "-c", "pnpm install -r --offline; pnpm dev"]
+WORKDIR /usr/src/pwa
+
+ENV NEXT_TELEMETRY_DISABLED 1
+
+# prevent the reinstallation of node modules at every changes in the source code
+COPY package.json yarn.lock ./
+RUN yarn
+
+COPY . ./
+
+VOLUME /usr/src/pwa/node_modules
 
 
-FROM builder_base AS builder
-COPY --link . .
-COPY --from=deps --link /srv/app/node_modules ./node_modules
+# "development" stage
+# depends on the "common" stage above
+FROM api_platform_pwa_common AS api_platform_pwa_dev
 
-RUN pnpm run build
+ENV API_PLATFORM_CLIENT_GENERATOR_OUTPUT .
+RUN yarn global add @api-platform/client-generator
+
+CMD ["yarn", "dev"]
 
 
-# Production image, copy all the files and run next
-FROM node:18-alpine AS prod
-WORKDIR /srv/app
+# "build" stage
+# depends on the "common" stage above
+FROM api_platform_pwa_common AS api_platform_pwa_prod
 
 ENV NODE_ENV production
-# Uncomment the following line in case you want to disable telemetry during runtime.
-# ENV NEXT_TELEMETRY_DISABLED 1
+ARG NEXT_PUBLIC_ENTRYPOINT
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+RUN set -eux; \
+	yarn build
 
-COPY --from=builder --link /srv/app/public ./public
-
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
-COPY --from=builder --link --chown=nextjs:nodejs /srv/app/.next/standalone ./
-COPY --from=builder --link --chown=nextjs:nodejs /srv/app/.next/static ./.next/static
-
-USER nextjs
-
-EXPOSE 3000
-
-ENV PORT 3000
-
-CMD ["node", "server.js"]
+CMD ["yarn", "start"]

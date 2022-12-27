@@ -1,8 +1,6 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  reactStrictMode: true,
+module.exports = {
+  serverRuntimeConfig: {
+    NEXT_PUBLIC_ENTRYPOINT: process.env.NEXT_PUBLIC_ENTRYPOINT || "https://localhost",
+  },
   swcMinify: true,
-  output: 'standalone',
-}
-
-module.exports = nextConfig
+};
