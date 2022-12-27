@@ -1,6 +1,12 @@
 {
     # Debug
-    {$CADDY_DEBUG}
+    {$DEBUG}
+    # HTTP/3 support
+    servers {
+        protocol {
+            experimental_http3
+        }
+    }
 }
 
 {$SERVER_NAME}
